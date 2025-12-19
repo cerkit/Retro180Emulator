@@ -26,7 +26,9 @@ struct TerminalView: View {
             let val = first.value
             // Only handle standard ASCII/Control characters for now to avoid crashes (val <= 255)
             if val <= 255 {
-                onKey(UInt8(val))
+                // Map Delete (0x7F) to Backspace (0x08) for CP/M compatibility
+                let charToSend = (val == 0x7F) ? 0x08 : UInt8(val)
+                onKey(charToSend)
                 return .handled
             }
             return .ignored
@@ -108,6 +110,9 @@ class TerminalViewModel: ObservableObject {
             newLine()
         } else if char == "\r" {
             cursorCol = 0
+        } else if char == "\u{08}" || char == "\u{7F}" {
+            // Backspace / Delete: Move cursor left
+            cursorCol = max(0, cursorCol - 1)
         } else {
             if cursorRow < 25 && cursorCol < 80 {
                 grid[cursorRow][cursorCol] = displayChar
