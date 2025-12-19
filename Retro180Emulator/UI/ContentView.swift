@@ -1,12 +1,15 @@
 import AppKit
 import SwiftUI
 internal import UniformTypeIdentifiers
+internal import AVFAudio
 
 struct ContentView: View {
     @StateObject var motherboard = Motherboard()
     @StateObject var terminalVM = TerminalViewModel()
     @State private var showingFileImporter = false
     @State private var xmodem: XMODEM?
+    @State private var showingSpeechDialog = false
+    @State private var speechInput = "Hello World"
 
     var body: some View {
         VStack {
@@ -34,6 +37,13 @@ struct ContentView: View {
                         Label("Upload", systemImage: "arrow.up.doc")
                     }
                     .help("Upload binary file using XMODEM")
+
+                    Button(action: {
+                        showingSpeechDialog = true
+                    }) {
+                        Label("Speech Tool", systemImage: "waveform")
+                    }
+                    .help("Open Speech Synthesis BASIC Generator")
 
                     Button(action: {
                         motherboard.reset()
@@ -88,6 +98,45 @@ struct ContentView: View {
                 print("File import failed: \(error.localizedDescription)")
             }
         }
+        .sheet(isPresented: $showingSpeechDialog) {
+            VStack(spacing: 20) {
+                Text("Speech Tool: SPEAK")
+                    .font(.headline)
+
+                Text("Enter text to speak (e.g. 'Hello World'):")
+                    .font(.caption)
+
+                TextEditor(text: $speechInput)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(height: 150)
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.5)))
+
+                Picker(
+                    "Voice",
+                    selection: Binding(
+                        get: { motherboard.speechDevice.currentVoiceIdentifier },
+                        set: { motherboard.speechDevice.currentVoiceIdentifier = $0 }
+                    )
+                ) {
+                    ForEach(motherboard.speechDevice.availableVoices, id: \.identifier) { voice in
+                        Text(voice.name).tag(voice.identifier)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                HStack {
+                    Button("Cancel") { showingSpeechDialog = false }
+                    Button("Generate & Run") {
+                        let program = generateBasicSpeech(from: speechInput)
+                        motherboard.pasteText(program)
+                        showingSpeechDialog = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding()
+            .frame(width: 400, height: 400)
+        }
     }
 
     func startUpload(data: Data) {
@@ -104,6 +153,48 @@ struct ContentView: View {
                 self.xmodem = nil
             }
         }
+    }
+
+    func generateBasicSpeech(from input: String) -> String {
+        let cleanInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\"", with: "'")
+
+        if cleanInput.isEmpty { return "" }
+
+        // Chunking output to avoid BASIC line length limits
+        let chunkSize = 60
+        var chunks: [String] = []
+        var startIndex = cleanInput.startIndex
+
+        while startIndex < cleanInput.endIndex {
+            let endIndex =
+                cleanInput.index(startIndex, offsetBy: chunkSize, limitedBy: cleanInput.endIndex)
+                ?? cleanInput.endIndex
+            chunks.append(String(cleanInput[startIndex..<endIndex]))
+            startIndex = endIndex
+        }
+
+        // Generate BASIC program using GOSUB for efficiency
+        var program = "10 REM SPEECH\r"
+        var lineNum = 20
+
+        for chunk in chunks {
+            program += "\(lineNum) S$=\"\(chunk)\"\r"
+            lineNum += 10
+            program += "\(lineNum) GOSUB 1000\r"
+            lineNum += 10
+        }
+
+        program += "\(lineNum) OUT 80,13\r"  // Trigger speech
+        program += "\(lineNum + 10) END\r"
+
+        // Output Subroutine
+        program += "1000 FOR I=1 TO LEN(S$):OUT 80,ASC(MID$(S$,I,1)):NEXT:RETURN\r"
+
+        // Auto-run
+        program += "RUN\r"
+
+        return program
     }
 }
 

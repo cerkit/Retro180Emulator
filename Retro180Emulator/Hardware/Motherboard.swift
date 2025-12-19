@@ -9,14 +9,15 @@ public class Motherboard: ObservableObject {
     public let asci0 = Z180ASCI()
     public let asci1 = Z180ASCI()
     public let prt = Z180PRT()
+    public let speechDevice = SpeechDevice()
 
-    @Published var terminalOutput = Data()
+    @Published public var terminalOutput = Data()
+    @Published public var inputQueue = [UInt8]()  // For pasting text
     private var timer: Timer?
     private var traceCount = 0
     private let maxTrace = 100000
-    private var tracing = true
+    private var tracing = false
 
-    private var inputQueue = [UInt8]()
     private var lastInputTick: UInt64 = 0
     private let inputInterval: UInt64 = 10000  // Cycles between characters
 
@@ -29,6 +30,7 @@ public class Motherboard: ObservableObject {
         io.asci0 = asci0
         io.asci1 = asci1
         io.prt = prt
+        io.speechDevice = speechDevice
 
         io.setInternalBase(0x00)
 
@@ -82,15 +84,6 @@ public class Motherboard: ObservableObject {
             guard let self = self else { return }
             let cyclesBefore = self.cpu.cycles
             for _ in 0..<5000 {
-                if self.tracing {
-                    let pc = self.cpu.PC
-                    let opcode = self.mmu.read(address: pc)
-                    print(
-                        "TRACE: PC=0x\(String(pc, radix: 16)), Op=0x\(String(opcode, radix: 16)), A=0x\(String(self.cpu.A, radix: 16)), F=0x\(String(self.cpu.F, radix: 16)), BC=0x\(String(self.cpu.BC, radix: 16)), HL=0x\(String(self.cpu.HL, radix: 16))"
-                    )
-                    self.traceCount += 1
-                    if self.traceCount >= self.maxTrace { self.tracing = false }
-                }
                 self.cpu.step()
             }
             let cyclesPassed = Int(self.cpu.cycles &- cyclesBefore)
@@ -105,12 +98,14 @@ public class Motherboard: ObservableObject {
             }
 
             // Sample output to console for debugging (every 500,000 cycles)
+            /*
             if self.cpu.cycles / 500000 > cyclesBefore / 500000 {
                 let opcode = self.mmu.read(address: self.cpu.PC)
                 print(
                     "CPU Status: PC=0x\(String(self.cpu.PC, radix: 16)), Op=0x\(String(opcode, radix: 16)), Cycles=\(self.cpu.cycles), Halted=\(self.cpu.halted)"
                 )
             }
+            */
 
             let data = self.asci0.getAvailableOutput()
             if !data.isEmpty {

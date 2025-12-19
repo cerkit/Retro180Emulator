@@ -163,16 +163,14 @@ public class Z180CPU {
             let low = memory?.read(address: tableAddr) ?? 0
             let high = memory?.read(address: tableAddr + 1) ?? 0
             let target = (UInt16(high) << 8) | UInt16(low)
-            print(
-                "CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (I=0x\(String(I, radix: 16)) Table=0x\(String(tableAddr, radix: 16))) -> Target 0x\(String(target, radix: 16))"
-            )
+            // print("CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (I=0x\(String(I, radix: 16)) Table=0x\(String(tableAddr, radix: 16))) -> Target 0x\(String(target, radix: 16))")
 
             IFF1 = false
             IFF2 = false
             push(PC)
             PC = target
         } else {
-            print("CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (IM \(IM))")
+            // print("CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (IM \(IM))")
             IFF1 = false
             IFF2 = false
             // Handle IM 0/1...
