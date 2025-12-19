@@ -9,6 +9,8 @@ struct TerminalView: View {
     let rows = 25
     let cols = 80
 
+    @AppStorage("monitorColor") private var monitorColor: MonitorColor = .amber
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(0..<rows, id: \.self) { row in
@@ -53,7 +55,7 @@ struct TerminalView: View {
 
                 Text(left)
                 Text(cursor)
-                    .background(Color(red: 1.0, green: 0.7, blue: 0.0))
+                    .background(monitorColor.color)
                     .foregroundColor(.black)
                 Text(right)
             } else {
@@ -61,18 +63,19 @@ struct TerminalView: View {
             }
         }
         .font(.system(size: 14, weight: .regular, design: .monospaced))
-        .foregroundColor(Color(red: 1.0, green: 0.7, blue: 0.0))
+        .foregroundColor(monitorColor.color)
         .frame(height: 16)
     }
 }
 
 struct CharacterView: View {
     let char: Character
+    @AppStorage("monitorColor") private var monitorColor: MonitorColor = .amber
 
     var body: some View {
         Text(String(char))
             .font(.system(size: 14, weight: .regular, design: .monospaced))
-            .foregroundColor(Color(red: 1.0, green: 0.7, blue: 0.0))
+            .foregroundColor(monitorColor.color)
             .frame(width: 8, height: 16)
             .clipped()
     }
