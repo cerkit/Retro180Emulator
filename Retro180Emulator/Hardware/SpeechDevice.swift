@@ -11,6 +11,12 @@ public class SpeechDevice: NSObject, AVSpeechSynthesizerDelegate {
     public private(set) var availableVoices: [AVSpeechSynthesisVoice]
     public var currentVoiceIdentifier: String
 
+    // Recording State
+    private let recordingSynthesizer = AVSpeechSynthesizer()
+    private var recordingFile: AVAudioFile?
+    private var recordingUrl: URL?
+    public var isRecording: Bool = false
+
     public var isSpeaking: Bool {
         return synthesizer.isSpeaking
     }
@@ -64,6 +70,22 @@ public class SpeechDevice: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
+    public func startRecording() {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString + ".wav")
+        self.recordingUrl = tempURL
+        self.recordingFile = nil
+        self.isRecording = true
+        print("SpeechDevice: Recording started at \(tempURL.path)")
+    }
+
+    public func stopRecording() -> URL? {
+        self.isRecording = false
+        self.recordingFile = nil
+        print("SpeechDevice: Recording stopped")
+        return self.recordingUrl
+    }
+
     private func speak(text: String) {
         let utterance = AVSpeechUtterance(string: text)
 
@@ -78,6 +100,27 @@ public class SpeechDevice: NSObject, AVSpeechSynthesizerDelegate {
 
         synthesizer.speak(utterance)
         print("SpeechDevice: Spoken '\(text)' using \(utterance.voice?.name ?? "Default")")
+
+        if isRecording {
+            let recordingUtterance = AVSpeechUtterance(string: text)
+            recordingUtterance.voice = utterance.voice
+            recordingUtterance.rate = utterance.rate
+            recordingUtterance.volume = utterance.volume
+
+            recordingSynthesizer.write(recordingUtterance) { [weak self] buffer in
+                guard let self = self, let pcmBuffer = buffer as? AVAudioPCMBuffer else { return }
+                do {
+                    if self.recordingFile == nil {
+                        guard let url = self.recordingUrl else { return }
+                        let settings = pcmBuffer.format.settings
+                        self.recordingFile = try AVAudioFile(forWriting: url, settings: settings)
+                    }
+                    try self.recordingFile?.write(from: pcmBuffer)
+                } catch {
+                    print("SpeechDevice: Error writing audio buffer: \(error)")
+                }
+            }
+        }
     }
 
     /// Read Status (Bit 7 = Ready). 0 = Busy Speaking, 1 = Ready.

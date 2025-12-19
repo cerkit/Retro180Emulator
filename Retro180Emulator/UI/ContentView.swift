@@ -1,7 +1,7 @@
+internal import AVFAudio
 import AppKit
 import SwiftUI
 internal import UniformTypeIdentifiers
-internal import AVFAudio
 
 struct ContentView: View {
     @StateObject var motherboard = Motherboard()
@@ -10,6 +10,11 @@ struct ContentView: View {
     @State private var xmodem: XMODEM?
     @State private var showingSpeechDialog = false
     @State private var speechInput = "Hello World"
+
+    // Recording State
+    @State private var isRecording = false
+    @State private var recordedAudioURL: URL?
+    @State private var showingSavePanel = false
 
     var body: some View {
         VStack {
@@ -55,6 +60,14 @@ struct ContentView: View {
                         Label("Reset", systemImage: "arrow.counterclockwise")
                     }
                     .help("Reset emulator and reload ROM")
+
+                    Button(action: toggleRecording) {
+                        Label(
+                            "Record",
+                            systemImage: isRecording ? "record.circle.fill" : "record.circle")
+                    }
+                    .help("Record speech output to WAV file")
+                    .tint(isRecording ? .red : .primary)
                 }
             }
 
@@ -137,6 +150,16 @@ struct ContentView: View {
             .padding()
             .frame(width: 400, height: 400)
         }
+        .fileExporter(
+            isPresented: $showingSavePanel,
+            document: recordedAudioURL.map { SoundFileDocument(url: $0) },
+            contentType: .wav,
+            defaultFilename: "speech_recording"
+        ) { result in
+            if case .success = result {
+                print("File saved successfully")
+            }
+        }
     }
 
     func startUpload(data: Data) {
@@ -196,8 +219,39 @@ struct ContentView: View {
 
         return program
     }
+
+    func toggleRecording() {
+        if isRecording {
+            if let url = motherboard.speechDevice.stopRecording() {
+                self.recordedAudioURL = url
+                self.showingSavePanel = true
+            }
+            isRecording = false
+        } else {
+            motherboard.speechDevice.startRecording()
+            isRecording = true
+        }
+    }
 }
 
 extension Color {
     static let darkGray = Color(white: 0.15)
+}
+
+struct SoundFileDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.wav] }
+
+    var url: URL
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        self.url = URL(fileURLWithPath: "")
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        return try FileWrapper(url: url, options: .immediate)
+    }
 }
