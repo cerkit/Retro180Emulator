@@ -12,6 +12,7 @@ public class Z180IODispatcher: Z180IO {
     public var asci0: Z180ASCI?
     public var asci1: Z180ASCI?
     public var prt: Z180PRT?
+    public var speechDevice: SpeechDevice?
 
     // External peripherals mapped by port range (for non-internal I/O)
     private var devices: [UInt16: ExternalDevice] = [:]
@@ -42,12 +43,15 @@ public class Z180IODispatcher: Z180IO {
             return readInternal(index: index)
         }
 
+        // SP0256 Speech / SpeechDevice (Port 0x50)
+        if iop == 0x50 {
+            return speechDevice?.readStatus() ?? 0xFF
+        }
+
         // 2. Check external devices (using full 16-bit address for external)
         if let device = devices[port] {
             return device.read(port: port)
         }
-
-        // 3. Removed (moved to top level)
 
         return 0xFF
     }
@@ -58,19 +62,15 @@ public class Z180IODispatcher: Z180IO {
         let p = port & 0x00FF
 
         // Internal I/O Base Register (IO range relocation)
-        let internalBase = self.internalBase  // cached or access from CPU IO property if needed?
-        // Actually, Z180 IO relocation is dynamic.
-        // We need to know the current internal I/O base.
-        // For now, assume 0x0000 or 0x00C0 based on initialization.
-        // But wait, standard Z180 reset is 0x00.
-        // RomWBW moves it to 0xC0 early on.
-        // Our Z180IODispatcher needs to know where it is mapped.
-        // But for write(), we check if (p & 0xC0) == (internalBase & 0xC0).
         // For simplicity, we check if port matches logic.
-        // But simpler: just masked range.
 
         if (p & 0xC0) == (self.internalBase & 0xC0) {
             writeInternal(index: Int(p - self.internalBase), value: value)  // Corrected index calculation
+            return
+        }
+
+        if p == 0x50 {
+            speechDevice?.write(byte: value)
             return
         }
 
