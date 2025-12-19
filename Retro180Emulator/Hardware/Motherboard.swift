@@ -2,6 +2,7 @@ import Combine
 import Foundation
 
 /// Motherboard integrates all components and runs the execution loop.
+@MainActor
 public class Motherboard: ObservableObject {
     public let cpu = Z180CPU()
     public let mmu = Z180MMU()
@@ -19,14 +20,18 @@ public class Motherboard: ObservableObject {
         io.setInternalBase(0x00)
 
         // Register ASCI0 at its default internal location (0x00-0x09)
-        // Note: The dispatcher handles internal port range checks
+        for port in UInt16(0)...9 {
+            io.registerDevice(port: port, device: asci0)
+        }
 
         loadDefaultROM()
     }
 
     public func start() {
         // Run at 100Hz (10ms)
-        timer = Timer.scheduledTimer(withTimeInterval: 0.010, repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.010, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            
             // Run a burst of instructions
             for _ in 0..<100 {
                 self.cpu.step()
@@ -35,9 +40,7 @@ public class Motherboard: ObservableObject {
             // Check for serial output
             let data = self.asci0.getAvailableOutput()
             if !data.isEmpty {
-                DispatchQueue.main.async {
-                    self.terminalOutput.append(data)
-                }
+                self.terminalOutput.append(data)
             }
         }
     }
@@ -48,15 +51,21 @@ public class Motherboard: ObservableObject {
 
     private func loadDefaultROM() {
         // Simple Z80 program:
-        // LD A, 'H'
-        // OUT (0x06), A ; In Z180 ASCI RDR0 is 0x06 (if internal base is 0x00)
-        // ... (This is just a placeholder, real RomWBW would be loaded)
+        // Prints "Hello!" in a loop
         var romData = Data([
-            0x3E, 0x48,  // LD A, 'H'
-            0xD3, 0x06,  // OUT (06), A
-            0x3E, 0x31,  // LD A, '1'
-            0xD3, 0x06,  // OUT (06), A
-            0x18, 0xFE,  // JR -2 (Loop)
+            0x3E, 0x48,  // 00: LD A, 'H'
+            0xD3, 0x04,  // 02: OUT (04), A
+            0x3E, 0x65,  // 04: LD A, 'e'
+            0xD3, 0x04,  // 06: OUT (04), A
+            0x3E, 0x6C,  // 08: LD A, 'l'
+            0xD3, 0x04,  // 0A: OUT (04), A
+            0x3E, 0x6C,  // 0C: LD A, 'l'
+            0xD3, 0x04,  // 0E: OUT (04), A
+            0x3E, 0x6F,  // 10: LD A, 'o'
+            0xD3, 0x04,  // 12: OUT (04), A
+            0x3E, 0x21,  // 14: LD A, '!'
+            0xD3, 0x04,  // 16: OUT (04), A
+            0x18, 0xE6,  // 18: JR -26 (Jump back to index 00)
         ])
         // Pad to ROM size
         romData.append(Data(count: 512 * 1024 - romData.count))
