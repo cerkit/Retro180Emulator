@@ -32,6 +32,32 @@ public class Motherboard: ObservableObject {
 
         io.setInternalBase(0x00)
 
+        initializeROM()
+    }
+
+    public func reset() {
+        // Stop the timer momentarily to prevent race conditions during reset
+        timer?.invalidate()
+        timer = nil
+
+        cpu.reset()
+        mmu.reset()  // Check if MMU has reset
+        // Since MMU doesn't have explicit reset, we might want to reload ROM which overwrites low memory anyway.
+        // Usually Z180 MMU registers are reset by CPU reset if mappable?
+        // Actually MMU registers are in Z180IODispatcher/internal registers.
+        // We probably should reset IO dispatcher too?
+        // For now, let's just reload ROM and clear buffers.
+
+        terminalOutput.removeAll()
+        inputQueue.removeAll()
+
+        initializeROM()
+
+        // Restart
+        start()
+    }
+
+    private func initializeROM() {
         // Try to load RomWBW from the app bundle first (fixes permission issues in Sandboxed apps)
         if let bundleURL = Bundle.main.url(
             forResource: "RomWBW-SCZ180_sc131_std-v351-2025-05-21", withExtension: "rom")

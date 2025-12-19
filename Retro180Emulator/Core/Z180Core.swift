@@ -64,7 +64,40 @@ public class Z180CPU {
     public var memory: Z180Memory?
     public var io: Z180IO?
 
-    public init() {}
+    public init() {
+        reset()
+    }
+
+    public func reset() {
+        PC = 0
+        SP = 0
+        A = 0
+        F = 0
+        B = 0
+        C = 0
+        D = 0
+        E = 0
+        H = 0
+        L = 0
+        A_prime = 0
+        F_prime = 0
+        B_prime = 0
+        C_prime = 0
+        D_prime = 0
+        E_prime = 0
+        H_prime = 0
+        L_prime = 0
+        IX = 0
+        IY = 0
+        I = 0
+        R = 0
+        IL = 0
+        IFF1 = false
+        IFF2 = false
+        IM = 0
+        halted = false
+        cycles = 0
+    }
 
     // 16-bit Pair Getters/Setters
     var AF: UInt16 {
