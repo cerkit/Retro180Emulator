@@ -25,6 +25,12 @@ public class Z180MMU: Z180Memory {
         }
     }
 
+    public func reset() {
+        CBR = 0
+        BBR = 0
+        CBAR = 0xF0
+    }
+
     /// Translates a 16-bit logical address to a 20-bit physical address.
     /// Z180 logic:
     /// Area 0: 0x0000 to (BA << 12) - 1

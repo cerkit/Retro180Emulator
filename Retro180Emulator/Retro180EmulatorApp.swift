@@ -16,7 +16,7 @@ struct Retro180EmulatorApp: App {
             ContentView()
         }
         .commands {
-            CommandMenu("View") {
+            CommandMenu("Display") {
                 Picker("Monitor Color", selection: $monitorColor) {
                     ForEach(MonitorColor.allCases) { color in
                         Text(color.rawValue.capitalized).tag(color)

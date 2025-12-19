@@ -10,23 +10,6 @@ struct ContentView: View {
 
     var body: some View {
         VStack {
-            HStack {
-                Text("Retro180 Emulator")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                Spacer()
-                Button("Paste") {
-                    if let clipboardString = NSPasteboard.general.string(forType: .string) {
-                        motherboard.pasteText(clipboardString)
-                    }
-                }
-                Button("Upload (XMODEM)") {
-                    showingFileImporter = true
-                }
-            }
-            .padding()
-            .background(Color.darkGray)
-
             TerminalView(
                 viewModel: terminalVM,
                 onKey: { key in
@@ -34,6 +17,36 @@ struct ContentView: View {
                 }
             )
             .frame(width: 800, height: 480)
+            .toolbar {
+                ToolbarItemGroup(placement: .automatic) {
+                    Button(action: {
+                        if let clipboardString = NSPasteboard.general.string(forType: .string) {
+                            motherboard.pasteText(clipboardString)
+                        }
+                    }) {
+                        Label("Paste", systemImage: "doc.on.clipboard")
+                    }
+                    .help("Paste text from system clipboard")
+
+                    Button(action: {
+                        showingFileImporter = true
+                    }) {
+                        Label("Upload", systemImage: "arrow.up.doc")
+                    }
+                    .help("Upload binary file using XMODEM")
+
+                    Button(action: {
+                        motherboard.reset()
+                        terminalVM.grid = Array(
+                            repeating: Array(repeating: " ", count: 80), count: 25)
+                        terminalVM.cursorRow = 0
+                        terminalVM.cursorCol = 0
+                    }) {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                    }
+                    .help("Reset emulator and reload ROM")
+                }
+            }
 
             HStack {
                 Text("Status: \(motherboard.cpu.halted ? "Halted" : "Running")")
