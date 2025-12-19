@@ -9,9 +9,20 @@ import SwiftUI
 
 @main
 struct Retro180EmulatorApp: App {
+    @AppStorage("monitorColor") private var monitorColor: MonitorColor = .amber
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+        }
+        .commands {
+            CommandMenu("View") {
+                Picker("Monitor Color", selection: $monitorColor) {
+                    ForEach(MonitorColor.allCases) { color in
+                        Text(color.rawValue.capitalized).tag(color)
+                    }
+                }
+            }
         }
     }
 }
