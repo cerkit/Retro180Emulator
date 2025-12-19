@@ -1,11 +1,13 @@
 import Foundation
 
 /// Z180 ASCI (Async Serial Communication Interface)
-/// This emulates the on-chip serial ports of the Z180.
+/// This emulates a single channel of the on-chip serial ports of the Z180.
 public class Z180ASCI: ExternalDevice {
-    private var control0: UInt8 = 0
-    private var control1: UInt8 = 0
-    private var status: UInt8 = 0x02  // TDRE (Transmitter Data Register Empty) starts set
+    private var controlA: UInt8 = 0
+    private var controlB: UInt8 = 0
+    private var extensionControl: UInt8 = 0
+    private var interruptEnable: UInt8 = 0
+    private var status: UInt8 = 0x02  // TDRE (Transmitter Data Register Empty) set on reset
 
     // Buffers for input and output
     public var inputBuffer = Data()
@@ -14,14 +16,14 @@ public class Z180ASCI: ExternalDevice {
     public init() {}
 
     public func read(port: UInt16) -> UInt8 {
-        // Ports depend on mapping, but typically internal address 0x00-0x09
-        // This class will be wrapped by the IODispatcher
-        let internalPort = port & 0x3F
+        // We use a simplified internal offset for the channel based on port addr
+        // 0=CNTLA, 1=CNTLB, 2=STAT, 3=TDR, 4=RDR, 5=ASEXT, 6=IER
+        let reg = internalRegister(for: port)
 
-        switch internalPort {
-        case 0x00:  // CNTLA0
-            return control0
-        case 0x02:  // STAT0
+        switch reg {
+        case 0: return controlA
+        case 1: return controlB
+        case 2:
             var s = status
             if !inputBuffer.isEmpty {
                 s |= 0x80  // RDRF (Receive Data Register Full)
@@ -29,30 +31,45 @@ public class Z180ASCI: ExternalDevice {
                 s &= ~0x80
             }
             return s
-        case 0x04:  // TDR0 (Transmit Data Register) - Write only, but some impls return 0
-            return 0
-        case 0x06:  // RDR0 (Receive Data Register)
-            return inputBuffer.popFirst() ?? 0
-        default:
-            return 0
+        case 4: return inputBuffer.popFirst() ?? 0
+        case 5: return extensionControl
+        case 6: return interruptEnable
+        default: return 0
         }
     }
 
     public func write(port: UInt16, value: UInt8) {
-        let internalPort = port & 0x3F
+        let reg = internalRegister(for: port)
 
-        switch internalPort {
-        case 0x00:  // CNTLA0
-            control0 = value
-        case 0x04:  // TDR0
+        switch reg {
+        case 0: controlA = value
+        case 1: controlB = value
+        case 3:  // TDR
             outputBuffer.append(value)
-        // In a real emu, we might trigger a UI update or serial send here
-        default:
-            break
+            // Real-time console mirror for debugging
+            let scalar = UnicodeScalar(value)
+            print("\(Character(scalar))", terminator: "")
+            fflush(stdout)
+        case 5: extensionControl = value
+        case 6: interruptEnable = value
+        default: break
         }
     }
 
-    // External interface for UI/Terminal
+    private func internalRegister(for port: UInt16) -> Int {
+        let p = port & 0x3F
+        switch p {
+        case 0x00, 0x01: return 0  // CNTLA
+        case 0x02, 0x03: return 1  // CNTLB
+        case 0x04, 0x05: return 2  // STAT
+        case 0x06, 0x07: return 3  // TDR
+        case 0x08, 0x09: return 4  // RDR
+        case 0x12, 0x13: return 5  // ASEXT
+        case 0x0E, 0x0F: return 6  // IER
+        default: return -1
+        }
+    }
+
     public func receiveFromTerminal(_ byte: UInt8) {
         inputBuffer.append(byte)
     }

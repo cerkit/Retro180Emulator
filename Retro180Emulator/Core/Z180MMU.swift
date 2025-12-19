@@ -34,20 +34,19 @@ public class Z180MMU: Z180Memory {
         let baThreshold = UInt16(CBAR & 0x0F) << 12
         let caThreshold = UInt16(CBAR >> 4) << 12
 
+        var base: UInt8 = 0
         if logical < baThreshold {
-            // Area 0: Always Base 0
-            return UInt32(logical)
+            base = 0  // Area 0 always uses 0 as base
         } else if logical < caThreshold {
-            // Bank Area
-            let base = UInt32(BBR) << 12
-            let offset = UInt32(logical - baThreshold)
-            return (base + offset) & 0xFFFFF
+            base = BBR
         } else {
-            // Area 1
-            let base = UInt32(CBR) << 12
-            let offset = UInt32(logical - caThreshold)
-            return (base + offset) & 0xFFFFF
+            base = CBR
         }
+
+        // Z180 Spec: Physical = (Logical + (Base << 12)) & 0xFFFFF
+        // Note: The addition of the base to the high 4 bits of the logical address
+        // can carry into the higher physical address bits (up to 20 bits).
+        return (UInt32(logical) + (UInt32(base) << 12)) & 0xFFFFF
     }
 
     public func read(address: UInt16) -> UInt8 {
@@ -61,23 +60,33 @@ public class Z180MMU: Z180Memory {
     }
 
     public func readPhysical(address: UInt32) -> UInt8 {
+        let addr = Int(address & 0xFFFFF)
         // SC131 Mapping:
-        // Physical 0x00000 - 0x7FFFF is often Flash ROM
-        // Physical 0x80000 - 0xFFFFF is RAM
-        // However, RomWBW often swaps this or uses different mapping.
-        // For SC131: FLASH is bottom 512K, RAM is top 512K.
-        if address < 0x80000 {
-            return rom[Int(address)]
+        // 0x00000 - 0x7FFFF: ROM (512K)
+        // 0x80000 - 0xFFFFF: RAM (512K)
+        if addr < 0x80000 {
+            if addr < rom.count {
+                return rom[addr]
+            }
+            return 0xFF
         } else {
-            return ram[Int(address - 0x80000)]
+            let ramAddr = addr - 0x80000
+            if ramAddr < ram.count {
+                return ram[ramAddr]
+            }
+            return 0xFF
         }
     }
 
     public func writePhysical(address: UInt32, value: UInt8) {
-        if address >= 0x80000 {
-            ram[Int(address - 0x80000)] = value
+        let addr = Int(address & 0xFFFFF)
+        if addr >= 0x80000 {
+            let ramAddr = addr - 0x80000
+            if ramAddr < ram.count {
+                ram[ramAddr] = value
+            }
         }
-        // Flash ROM is typically write-protected or requires special sequences
+        // ROM is typically read-only
     }
 
     // Helper to load ROM data

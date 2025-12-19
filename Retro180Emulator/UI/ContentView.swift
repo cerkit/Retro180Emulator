@@ -33,14 +33,14 @@ struct ContentView: View {
             .font(.caption)
         }
         .onReceive(motherboard.$terminalOutput) { data in
-            for byte in data {
-                // Pass the byte to the XMODEM handler if a transfer is active
-                xmodem?.handleByte(byte)
-                
-                terminalVM.putChar(Character(UnicodeScalar(byte)))
-            }
-            
             if !data.isEmpty {
+                print("ContentView: Received \(data.count) bytes of terminal data")
+                for byte in data {
+                    // Pass the byte to the XMODEM handler if a transfer is active
+                    xmodem?.handleByte(byte)
+
+                    terminalVM.putChar(Character(UnicodeScalar(byte)))
+                }
                 motherboard.terminalOutput.removeAll()
             }
         }

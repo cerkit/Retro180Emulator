@@ -1,5 +1,5 @@
-import SwiftUI
 import Combine
+import SwiftUI
 
 struct TerminalView: View {
     @ObservedObject var viewModel: TerminalViewModel
@@ -8,13 +8,12 @@ struct TerminalView: View {
     let cols = 80
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(0..<rows, id: \.self) { row in
-                HStack(spacing: 0) {
-                    ForEach(0..<cols, id: \.self) { col in
-                        CharacterView(char: viewModel.grid[row][col])
-                    }
-                }
+                Text(String(viewModel.grid[row]))
+                    .font(.system(size: 14, weight: .regular, design: .monospaced))
+                    .foregroundColor(Color(red: 1.0, green: 0.7, blue: 0.0))
+                    .frame(height: 16)
             }
         }
         .padding(10)
@@ -31,9 +30,9 @@ struct CharacterView: View {
     var body: some View {
         Text(String(char))
             .font(.system(size: 14, weight: .regular, design: .monospaced))
-            .foregroundColor(Color(red: 1.0, green: 0.7, blue: 0.0))  // Amber
+            .foregroundColor(Color(red: 1.0, green: 0.7, blue: 0.0))
             .frame(width: 8, height: 16)
-            .clipped() // Ensure it doesn't bleed into other cells
+            .clipped()
     }
 }
 
@@ -46,21 +45,34 @@ class TerminalViewModel: ObservableObject {
     private var cursorCol = 0
 
     func putChar(_ char: Character) {
-        // Simple terminal logic
+        // Map CP437 box-drawing characters to Unicode
+        var displayChar = char
+        if let scalar = char.unicodeScalars.first?.value {
+            switch scalar {
+            case 0xDA: displayChar = "┌"
+            case 0xBF: displayChar = "┐"
+            case 0xC0: displayChar = "└"
+            case 0xD9: displayChar = "┘"
+            case 0xC4: displayChar = "─"
+            case 0xB3: displayChar = "│"
+            default: break
+            }
+        }
+
         if char == "\n" {
             newLine()
         } else if char == "\r" {
             cursorCol = 0
         } else {
-            // Prevent out of bounds
             if cursorRow < 25 && cursorCol < 80 {
-                grid[cursorRow][cursorCol] = char
+                grid[cursorRow][cursorCol] = displayChar
                 cursorCol += 1
                 if cursorCol >= 80 {
                     newLine()
                 }
             }
         }
+        objectWillChange.send()
     }
 
     private func newLine() {
@@ -79,7 +91,5 @@ class TerminalViewModel: ObservableObject {
         grid[24] = Array(repeating: " ", count: 80)
     }
 
-    func start() {
-        // Initialization if needed
-    }
+    func start() {}
 }
