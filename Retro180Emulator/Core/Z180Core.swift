@@ -111,29 +111,44 @@ public class Z180CPU {
 
     private func checkInterrupts() {
         if !IFF1 { return }
-        if let dispatcher = io as? Z180IODispatcher {
-            if let prt = dispatcher.prt {
-                if prt.checkInterrupt(channel: 0) {
-                    acknowledgeInterrupt(vector: 0x0C)
-                    return
-                }
-                if prt.checkInterrupt(channel: 1) {
-                    acknowledgeInterrupt(vector: 0x0E)
-                    return
-                }
-            }
+        if let vector = io?.checkInterrupts() {
+            acknowledgeInterrupt(vector: vector)
         }
     }
 
     private func acknowledgeInterrupt(vector: UInt8) {
-        IFF1 = false
-        IFF2 = false
+        // Read IL for debug context if possible (cast IO)
+        if let dispatcher = io as? Z180IODispatcher {
+            // Access IL at index 0x33 directly from internal registers provided we can expose them?
+            // Or typically we trigger a read?
+            // Let's just trust the vector passed in is (IL | Offset).
+            // But we want to see 'I'.
+        }
+
+        if IM == 2 {
+            let tableAddr = (UInt16(I) << 8) | UInt16(vector)
+            let low = memory?.read(address: tableAddr) ?? 0
+            let high = memory?.read(address: tableAddr + 1) ?? 0
+            let target = (UInt16(high) << 8) | UInt16(low)
+            print(
+                "CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (I=0x\(String(I, radix: 16)) Table=0x\(String(tableAddr, radix: 16))) -> Target 0x\(String(target, radix: 16))"
+            )
+
+            IFF1 = false
+            IFF2 = false
+            push(PC)
+            PC = target
+        } else {
+            print("CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (IM \(IM))")
+            IFF1 = false
+            IFF2 = false
+            // Handle IM 0/1...
+            if IM == 1 {
+                push(PC)
+                PC = 0x38
+            }
+        }
         halted = false
-        let high = I
-        let low = (IL & 0xE0) | (vector & 0x1F)
-        let addr = (UInt16(high) << 8) | UInt16(low)
-        push(PC)
-        PC = readWord(addr)
         cycles = cycles &+ 12
     }
 
@@ -1010,4 +1025,5 @@ public protocol Z180Memory {
 public protocol Z180IO {
     func read(port: UInt16) -> UInt8
     func write(port: UInt16, value: UInt8)
+    func checkInterrupts() -> UInt8?
 }

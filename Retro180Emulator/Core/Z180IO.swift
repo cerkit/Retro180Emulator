@@ -53,27 +53,54 @@ public class Z180IODispatcher: Z180IO {
     }
 
     public func write(port: UInt16, value: UInt8) {
-        let iop = port & 0xFF
+        // Internal I/O Dispatch
+        // A15-A8 are ignored for internal I/O
+        let p = port & 0x00FF
 
-        // 1. Check if it's an internal Z180 register
-        if iop >= internalBase && iop < internalBase + 64 {
-            let index = Int(iop - internalBase)
-            internalRegisters[index] = value
-            writeInternal(index: index, value: value)
+        // Internal I/O Base Register (IO range relocation)
+        let internalBase = self.internalBase  // cached or access from CPU IO property if needed?
+        // Actually, Z180 IO relocation is dynamic.
+        // We need to know the current internal I/O base.
+        // For now, assume 0x0000 or 0x00C0 based on initialization.
+        // But wait, standard Z180 reset is 0x00.
+        // RomWBW moves it to 0xC0 early on.
+        // Our Z180IODispatcher needs to know where it is mapped.
+        // But for write(), we check if (p & 0xC0) == (internalBase & 0xC0).
+        // For simplicity, we check if port matches logic.
+        // But simpler: just masked range.
+
+        if (p & 0xC0) == (self.internalBase & 0xC0) {
+            writeInternal(index: Int(p - self.internalBase), value: value)  // Corrected index calculation
+            return
         }
 
-        // 2. Dispatch to external device if registered (non-internal)
-        else if let device = devices[port] {
+        // External I/O Dispatch
+        if let device = devices[port] {
             device.write(port: port, value: value)
+            return
         }
+    }
+
+    public func checkInterrupts() -> UInt8? {
+        // IL Register (Offset 0x33) determines the base of internal vectors (Bits 7-5)
+        let il = internalRegisters[0x33] & 0xE0
+
+        if let prt = prt {
+            if prt.checkInterrupt(channel: 0) { return il | 0x04 }  // PRT0 (Standard 0x04)
+            if prt.checkInterrupt(channel: 1) { return il | 0x06 }  // PRT1 (Standard 0x06)
+        }
+        if let asci0 = asci0 {
+            if asci0.checkInterrupt() { return il | 0x0E }  // ASCI0 (Standard 0x0E)
+        }
+        return nil
     }
 
     private func readInternal(index: Int) -> UInt8 {
         let p = UInt16(index)
         switch p {
-        case 0x00, 0x02, 0x04, 0x06, 0x08, 0x0E, 0x12:  // ASCI0 registers
+        case 0x00...0x09, 0x12:  // ASCI0 registers (Standard Z180 range)
             return asci0?.read(port: p) ?? 0xFF
-        case 0x01, 0x03, 0x05, 0x07, 0x09, 0x0F, 0x13:  // ASCI1 registers
+        case 0x01, 0x03, 0x05, 0x07, 0x09, 0x0F, 0x13:  // ASCI1 registers (TODO: Fix mapping if needed)
             return asci1?.read(port: p) ?? 0xFF
         case 0x10, 0x11, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19:  // PRT registers
             return prt?.read(port: p) ?? 0xFF
@@ -88,7 +115,7 @@ public class Z180IODispatcher: Z180IO {
     private func writeInternal(index: Int, value: UInt8) {
         let p = UInt16(index)
         switch p {
-        case 0x00, 0x02, 0x04, 0x06, 0x08, 0x0E, 0x12:  // ASCI0 registers
+        case 0x00...0x09, 0x12:  // ASCI0 registers
             asci0?.write(port: p, value: value)
         case 0x01, 0x03, 0x05, 0x07, 0x09, 0x0F, 0x13:  // ASCI1 registers
             asci1?.write(port: p, value: value)
@@ -98,7 +125,11 @@ public class Z180IODispatcher: Z180IO {
         case 0x39: mmu?.BBR = value
         case 0x3A: mmu?.CBAR = value
         case 0x3F: setInternalBase(value)
-        default: break
+        default:
+            if p == 0x33 {
+                print("Z180IO: Write IL (Interrupt Vector Low) -> 0x\(String(value, radix: 16))")
+            }
+            internalRegisters[index] = value
         }
     }
 }

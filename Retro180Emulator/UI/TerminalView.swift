@@ -3,6 +3,8 @@ import SwiftUI
 
 struct TerminalView: View {
     @ObservedObject var viewModel: TerminalViewModel
+    var onKey: (UInt8) -> Void
+    @FocusState private var isFocused: Bool
 
     let rows = 25
     let cols = 80
@@ -10,17 +12,57 @@ struct TerminalView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(0..<rows, id: \.self) { row in
-                Text(String(viewModel.grid[row]))
-                    .font(.system(size: 14, weight: .regular, design: .monospaced))
-                    .foregroundColor(Color(red: 1.0, green: 0.7, blue: 0.0))
-                    .frame(height: 16)
+                lineView(row: row)
             }
         }
         .padding(10)
         .background(Color.black)
+        .focusable()
+        .focused($isFocused)
+        .onKeyPress { press in
+            guard let first = press.characters.first?.unicodeScalars.first else { return .ignored }
+            let val = first.value
+            // Only handle standard ASCII/Control characters for now to avoid crashes (val <= 255)
+            if val <= 255 {
+                onKey(UInt8(val))
+                return .handled
+            }
+            return .ignored
+        }
         .onAppear {
+            isFocused = true
             viewModel.start()
         }
+        .onTapGesture {
+            isFocused = true
+        }
+    }
+
+    private func lineView(row: Int) -> some View {
+        let line = viewModel.grid[row]
+        let isCursorRow = row == viewModel.cursorRow
+
+        return HStack(spacing: 0) {
+            if isCursorRow {
+                let col = viewModel.cursorCol
+                let safeCol = min(max(0, col), cols - 1)
+
+                let left = String(line[0..<safeCol])
+                let cursor = String(line[safeCol])
+                let right = String(line[(safeCol + 1)...])
+
+                Text(left)
+                Text(cursor)
+                    .background(Color(red: 1.0, green: 0.7, blue: 0.0))
+                    .foregroundColor(.black)
+                Text(right)
+            } else {
+                Text(String(line))
+            }
+        }
+        .font(.system(size: 14, weight: .regular, design: .monospaced))
+        .foregroundColor(Color(red: 1.0, green: 0.7, blue: 0.0))
+        .frame(height: 16)
     }
 }
 
@@ -41,8 +83,8 @@ class TerminalViewModel: ObservableObject {
     @Published var grid: [[Character]] = Array(
         repeating: Array(repeating: " ", count: 80), count: 25)
 
-    private var cursorRow = 0
-    private var cursorCol = 0
+    @Published var cursorRow = 0
+    @Published var cursorCol = 0
 
     func putChar(_ char: Character) {
         // Map CP437 box-drawing characters to Unicode

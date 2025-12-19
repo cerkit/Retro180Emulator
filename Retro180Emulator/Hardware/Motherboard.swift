@@ -16,6 +16,10 @@ public class Motherboard: ObservableObject {
     private let maxTrace = 100000
     private var tracing = true
 
+    private var inputQueue = [UInt8]()
+    private var lastInputTick: UInt64 = 0
+    private let inputInterval: UInt64 = 10000  // Cycles between characters
+
     public init() {
         cpu.memory = mmu
         cpu.io = io
@@ -66,8 +70,16 @@ public class Motherboard: ObservableObject {
             let cyclesPassed = Int(self.cpu.cycles &- cyclesBefore)
             self.prt.step(cycles: cyclesPassed)
 
-            // Sample output to console for debugging (every ~500,000 cycles)
-            if self.cpu.cycles % 500000 < 5000 {
+            // Feed input queue into ASCII with rate limiting
+            if !self.inputQueue.isEmpty && self.cpu.cycles > self.lastInputTick + self.inputInterval
+            {
+                let char = self.inputQueue.removeFirst()
+                self.asci0.receiveFromTerminal(char)
+                self.lastInputTick = self.cpu.cycles
+            }
+
+            // Sample output to console for debugging (every 500,000 cycles)
+            if self.cpu.cycles / 500000 > cyclesBefore / 500000 {
                 let opcode = self.mmu.read(address: self.cpu.PC)
                 print(
                     "CPU Status: PC=0x\(String(self.cpu.PC, radix: 16)), Op=0x\(String(opcode, radix: 16)), Cycles=\(self.cpu.cycles), Halted=\(self.cpu.halted)"
@@ -83,7 +95,21 @@ public class Motherboard: ObservableObject {
     }
 
     public func sendToCPU(_ byte: UInt8) {
-        asci0.receiveFromTerminal(byte)
+        inputQueue.append(byte)
+    }
+
+    public func pasteText(_ text: String) {
+        // Normalize line endings to CR (0x0D) for CP/M / RomWBW
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\r")
+            .replacingOccurrences(of: "\n", with: "\r")
+        let bytes = normalized.data(using: .ascii) ?? Data()
+        for byte in bytes {
+            inputQueue.append(byte)
+        }
+    }
+
+    public func clearTerminalOutput() {
+        terminalOutput.removeAll()
     }
 
     public func loadROM(fromURL url: URL) {

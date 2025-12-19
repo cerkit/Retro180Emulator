@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 internal import UniformTypeIdentifiers
 
@@ -14,15 +15,25 @@ struct ContentView: View {
                     .font(.headline)
                     .foregroundColor(.white)
                 Spacer()
-                Button("Upload via XMODEM") {
+                Button("Paste") {
+                    if let clipboardString = NSPasteboard.general.string(forType: .string) {
+                        motherboard.pasteText(clipboardString)
+                    }
+                }
+                Button("Upload (XMODEM)") {
                     showingFileImporter = true
                 }
             }
             .padding()
             .background(Color.darkGray)
 
-            TerminalView(viewModel: terminalVM)
-                .frame(width: 800, height: 480)
+            TerminalView(
+                viewModel: terminalVM,
+                onKey: { key in
+                    motherboard.sendToCPU(key)
+                }
+            )
+            .frame(width: 800, height: 480)
 
             HStack {
                 Text("Status: \(motherboard.cpu.halted ? "Halted" : "Running")")
@@ -41,7 +52,7 @@ struct ContentView: View {
 
                     terminalVM.putChar(Character(UnicodeScalar(byte)))
                 }
-                motherboard.terminalOutput.removeAll()
+                motherboard.clearTerminalOutput()
             }
         }
         .onAppear {
