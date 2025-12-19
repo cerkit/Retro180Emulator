@@ -5,9 +5,15 @@ import Foundation
 public class Z180IODispatcher: Z180IO {
     // Internal Z180 registers (usually 0x00-0x3F or relocated to 0xC0-0xFF)
     private var internalRegisters = [UInt8](repeating: 0, count: 64)
-    private var internalBase: UInt16 = 0x00  // Default internal register base
+    private var internalBase: UInt16 = 0x00
 
-    // External peripherals mapped by port range
+    // Peripherals
+    public var mmu: Z180MMU?
+    public var asci0: Z180ASCI?
+    public var asci1: Z180ASCI?
+    public var prt: Z180PRT?
+
+    // External peripherals mapped by port range (for non-internal I/O)
     private var devices: [UInt16: ExternalDevice] = [:]
 
     public init() {}
@@ -21,40 +27,109 @@ public class Z180IODispatcher: Z180IO {
     }
 
     public func read(port: UInt16) -> UInt8 {
-        // Check if an explicit device is registered for this port first
+        // Z180 spec: internal I/O decodes only A7-A0. A15-A8 are ignored.
+        let iop = port & 0xFF
+
+        // 0. High priority dummy response for SD card detection (Port 0xCA/0xCB)
+        // These ports are within the relocated internal range (0xC0-0xFF) and must be forced.
+        if iop == 0xCA || iop == 0xCB {
+            return 0x00  // Return "Ready/Idle" status
+        }
+
+        // 1. Check if it's an internal Z180 register first
+        if iop >= internalBase && iop < internalBase + 64 {
+            let index = Int(iop - internalBase)
+            return readInternal(index: index)
+        }
+
+        // 2. Check external devices (using full 16-bit address for external)
         if let device = devices[port] {
             return device.read(port: port)
         }
 
-        // Check if it's an internal Z180 register
-        if port >= internalBase && port < internalBase + 64 {
-            let index = Int(port - internalBase)
-            return internalRegisters[index]
-        }
+        // 3. Removed (moved to top level)
 
-        return 0xFF  // Floating bus
+        return 0xFF
     }
 
     public func write(port: UInt16, value: UInt8) {
-        // Dispatch to device if registered
-        if let device = devices[port] {
-            device.write(port: port, value: value)
-            // We don't return here if it's also an internal register, 
-            // as we may need to handle internal logic (like ICR relocation)
+        // Internal I/O Dispatch
+        // A15-A8 are ignored for internal I/O
+        let p = port & 0x00FF
+
+        // Internal I/O Base Register (IO range relocation)
+        let internalBase = self.internalBase  // cached or access from CPU IO property if needed?
+        // Actually, Z180 IO relocation is dynamic.
+        // We need to know the current internal I/O base.
+        // For now, assume 0x0000 or 0x00C0 based on initialization.
+        // But wait, standard Z180 reset is 0x00.
+        // RomWBW moves it to 0xC0 early on.
+        // Our Z180IODispatcher needs to know where it is mapped.
+        // But for write(), we check if (p & 0xC0) == (internalBase & 0xC0).
+        // For simplicity, we check if port matches logic.
+        // But simpler: just masked range.
+
+        if (p & 0xC0) == (self.internalBase & 0xC0) {
+            writeInternal(index: Int(p - self.internalBase), value: value)  // Corrected index calculation
+            return
         }
 
-        // Check if it's an internal Z180 register
-        if port >= internalBase && port < internalBase + 64 {
-            let index = Int(port - internalBase)
-            internalRegisters[index] = value
-            handleInternalWrite(index: index, value: value)
+        // External I/O Dispatch
+        if let device = devices[port] {
+            device.write(port: port, value: value)
+            return
         }
     }
 
-    private func handleInternalWrite(index: Int, value: UInt8) {
-        if index == 0x3F {
-            // ICR - I/O Control Register
-            setInternalBase(value & 0xC0)
+    public func checkInterrupts() -> UInt8? {
+        // IL Register (Offset 0x33) determines the base of internal vectors (Bits 7-5)
+        let il = internalRegisters[0x33] & 0xE0
+
+        if let prt = prt {
+            if prt.checkInterrupt(channel: 0) { return il | 0x04 }  // PRT0 (Standard 0x04)
+            if prt.checkInterrupt(channel: 1) { return il | 0x06 }  // PRT1 (Standard 0x06)
+        }
+        if let asci0 = asci0 {
+            if asci0.checkInterrupt() { return il | 0x0E }  // ASCI0 (Standard 0x0E)
+        }
+        return nil
+    }
+
+    private func readInternal(index: Int) -> UInt8 {
+        let p = UInt16(index)
+        switch p {
+        case 0x00...0x09, 0x12:  // ASCI0 registers (Standard Z180 range)
+            return asci0?.read(port: p) ?? 0xFF
+        case 0x01, 0x03, 0x05, 0x07, 0x09, 0x0F, 0x13:  // ASCI1 registers (TODO: Fix mapping if needed)
+            return asci1?.read(port: p) ?? 0xFF
+        case 0x10, 0x11, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19:  // PRT registers
+            return prt?.read(port: p) ?? 0xFF
+        case 0x38: return mmu?.CBR ?? 0
+        case 0x39: return mmu?.BBR ?? 0
+        case 0x3A: return mmu?.CBAR ?? 0
+        case 0x3F: return UInt8(internalBase >> 6) << 6
+        default: return internalRegisters[index]
+        }
+    }
+
+    private func writeInternal(index: Int, value: UInt8) {
+        let p = UInt16(index)
+        switch p {
+        case 0x00...0x09, 0x12:  // ASCI0 registers
+            asci0?.write(port: p, value: value)
+        case 0x01, 0x03, 0x05, 0x07, 0x09, 0x0F, 0x13:  // ASCI1 registers
+            asci1?.write(port: p, value: value)
+        case 0x10, 0x11, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19:  // PRT registers
+            prt?.write(port: p, value: value)
+        case 0x38: mmu?.CBR = value
+        case 0x39: mmu?.BBR = value
+        case 0x3A: mmu?.CBAR = value
+        case 0x3F: setInternalBase(value)
+        default:
+            if p == 0x33 {
+                print("Z180IO: Write IL (Interrupt Vector Low) -> 0x\(String(value, radix: 16))")
+            }
+            internalRegisters[index] = value
         }
     }
 }

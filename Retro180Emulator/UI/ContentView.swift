@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 internal import UniformTypeIdentifiers
 
@@ -14,15 +15,25 @@ struct ContentView: View {
                     .font(.headline)
                     .foregroundColor(.white)
                 Spacer()
-                Button("Upload via XMODEM") {
+                Button("Paste") {
+                    if let clipboardString = NSPasteboard.general.string(forType: .string) {
+                        motherboard.pasteText(clipboardString)
+                    }
+                }
+                Button("Upload (XMODEM)") {
                     showingFileImporter = true
                 }
             }
             .padding()
             .background(Color.darkGray)
 
-            TerminalView(viewModel: terminalVM)
-                .frame(width: 800, height: 480)
+            TerminalView(
+                viewModel: terminalVM,
+                onKey: { key in
+                    motherboard.sendToCPU(key)
+                }
+            )
+            .frame(width: 800, height: 480)
 
             HStack {
                 Text("Status: \(motherboard.cpu.halted ? "Halted" : "Running")")
@@ -33,15 +44,15 @@ struct ContentView: View {
             .font(.caption)
         }
         .onReceive(motherboard.$terminalOutput) { data in
-            for byte in data {
-                // Pass the byte to the XMODEM handler if a transfer is active
-                xmodem?.handleByte(byte)
-                
-                terminalVM.putChar(Character(UnicodeScalar(byte)))
-            }
-            
             if !data.isEmpty {
-                motherboard.terminalOutput.removeAll()
+                print("ContentView: Received \(data.count) bytes of terminal data")
+                for byte in data {
+                    // Pass the byte to the XMODEM handler if a transfer is active
+                    xmodem?.handleByte(byte)
+
+                    terminalVM.putChar(Character(UnicodeScalar(byte)))
+                }
+                motherboard.clearTerminalOutput()
             }
         }
         .onAppear {
