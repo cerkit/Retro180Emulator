@@ -9,19 +9,28 @@ public class Motherboard: ObservableObject {
     public let asci0 = Z180ASCI()
     public let asci1 = Z180ASCI()
     public let prt = Z180PRT()
-    public let speechDevice = SpeechDevice()
 
-    @Published public var terminalOutput = Data()
     @Published public var inputQueue = [UInt8]()  // For pasting text
+    @Published public var sessionLog = ""
+    @Published public var ideStatusMessage = "IDE: Not Mounted"
+    public let terminalStream = PassthroughSubject<Data, Never>()
+    public let id = UUID()  // Unique Instance ID
     private var timer: Timer?
     private var traceCount = 0
     private let maxTrace = 100000
     private var tracing = false
 
     private var lastInputTick: UInt64 = 0
+
     private let inputInterval: UInt64 = 10000  // Cycles between characters
+    private var ramSaveTimer: Timer?
+    private let ramSaveInterval: TimeInterval = 30.0
 
     public init() {
+        print(
+            "Motherboard [\(id.uuidString.prefix(4))]: Init."
+        )
+
         cpu.memory = mmu
         cpu.io = io
 
@@ -30,11 +39,62 @@ public class Motherboard: ObservableObject {
         io.asci0 = asci0
         io.asci1 = asci1
         io.prt = prt
-        io.speechDevice = speechDevice
 
-        io.setInternalBase(0x00)
+        // SC126/RomWBW expects internal I/O at 0xC0 (verified by 0xF9 BBR writes and IDE @ 0x10)
+        io.setInternalBase(0xC0)
 
         initializeROM()
+        print("Motherboard: RAM File URL: \(ramFileURL.path)")
+        loadRAM()  // Restore RAM state
+
+        // Start Periodic Auto-Save
+        startRamAutoSave()
+    }
+
+    private var ramFileURL: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appendingPathComponent("ram.bin")
+    }
+
+    public func saveRAM() {
+        do {
+            try mmu.ram.write(to: ramFileURL)
+            print("Motherboard: Saved RAM to \(ramFileURL.lastPathComponent)")
+        } catch {
+            print("Motherboard: Failed to save RAM: \(error)")
+        }
+    }
+
+    public func injectRAM(_ data: Data) {
+        // Pad or Trim to 512KB
+        var newData = data
+        let targetSize = mmu.ram.count
+        if newData.count < targetSize {
+            newData.append(Data(repeating: 0, count: targetSize - newData.count))
+        } else if newData.count > targetSize {
+            newData = newData.prefix(targetSize)
+        }
+
+        mmu.ram = newData
+        print("Motherboard: Injected RAM (\(data.count) bytes)")
+        saveRAM()
+    }
+
+    private func loadRAM() {
+        let url = ramFileURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+
+        do {
+            let data = try Data(contentsOf: url)
+            if data.count == mmu.ram.count {
+                mmu.ram = data
+                print("Motherboard: Loaded RAM from \(url.lastPathComponent)")
+            } else {
+                print("Motherboard: Ignored RAM file (Size Mismatch)")
+            }
+        } catch {
+            print("Motherboard: Failed to load RAM: \(error)")
+        }
     }
 
     public func reset() {
@@ -44,38 +104,56 @@ public class Motherboard: ObservableObject {
 
         cpu.reset()
         mmu.reset()  // Check if MMU has reset
-        // Since MMU doesn't have explicit reset, we might want to reload ROM which overwrites low memory anyway.
-        // Usually Z180 MMU registers are reset by CPU reset if mappable?
-        // Actually MMU registers are in Z180IODispatcher/internal registers.
-        // We probably should reset IO dispatcher too?
-        // For now, let's just reload ROM and clear buffers.
 
-        terminalOutput.removeAll()
+        // SC126 Specific: Force Internal I/O to 0xC0 on Reset
+        io.setInternalBase(0xC0)
+
         inputQueue.removeAll()
+        lastInputTick = 0
+        sessionLog = ""
 
         initializeROM()
 
         // Restart
+        // Restart
         start()
+        startRamAutoSave()
+    }
+
+    private func startRamAutoSave() {
+        ramSaveTimer?.invalidate()
+        ramSaveTimer = Timer.scheduledTimer(withTimeInterval: ramSaveInterval, repeats: true) {
+            [weak self] _ in
+            self?.saveRAM()
+        }
     }
 
     private func initializeROM() {
-        // Try to load RomWBW from the app bundle first (fixes permission issues in Sandboxed apps)
-        if let bundleURL = Bundle.main.url(
-            forResource: "RomWBW-SCZ180_sc131_std-v351-2025-05-21", withExtension: "rom")
-        {
-            loadROM(fromURL: bundleURL)
-        } else {
-            // Fallback to absolute path (may fail if Sandbox is enabled)
+        // Try to load RomWBW for SC126 first
+        let romNames = [
+            "RomWBW-SCZ180_sc126_std-v351-2025-05-21",  // Found file
+            "RomWBW-SCZ180_sc126_std",  // SC126 Standard
+            "RomWBW-SCZ180_sc126_std-v3.5.1",  // Possible versioned name
+            "RomWBW-SCZ180_sc131_std-v351-2025-05-21",  // Fallback to SC131
+        ]
+
+        for name in romNames {
+            if let bundleURL = Bundle.main.url(forResource: name, withExtension: "rom") {
+                loadROM(fromURL: bundleURL)
+                return
+            }
+
+            // Absolute path fallback for hacking/debug
             let romPath =
-                "/Users/cerkit/Development/Z80/Retro180Emulator/Retro180Emulator/Retro180Emulator/ROMs/RomWBW-SCZ180_sc131_std-v351-2025-05-21.rom"
-            let url = URL(fileURLWithPath: romPath)
+                "/Users/cerkit/Development/Z80/Retro180Emulator/Retro180Emulator/Retro180Emulator/ROMs/\(name).rom"
             if FileManager.default.fileExists(atPath: romPath) {
-                loadROM(fromURL: url)
-            } else {
-                loadDefaultROM()
+                loadROM(fromURL: URL(fileURLWithPath: romPath))
+                return
             }
         }
+
+        print("Motherboard: No valid ROM found. Loading default test ROM.")
+        loadDefaultROM()
     }
 
     public func start() {
@@ -109,7 +187,10 @@ public class Motherboard: ObservableObject {
 
             let data = self.asci0.getAvailableOutput()
             if !data.isEmpty {
-                self.terminalOutput.append(data)
+                self.terminalStream.send(data)
+                // Append to session log (Heavy? Maybe limit?)
+                let str = String(decoding: data, as: UTF8.self)
+                self.sessionLog += str
             }
             self.objectWillChange.send()  // Ensure UI updates for cycles/halted state
         }
@@ -127,10 +208,6 @@ public class Motherboard: ObservableObject {
         for byte in bytes {
             inputQueue.append(byte)
         }
-    }
-
-    public func clearTerminalOutput() {
-        terminalOutput.removeAll()
     }
 
     public func loadROM(fromURL url: URL) {

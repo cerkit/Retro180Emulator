@@ -1,20 +1,28 @@
-internal import AVFAudio
 import AppKit
 import SwiftUI
-internal import UniformTypeIdentifiers
+import UniformTypeIdentifiers
 
 struct ContentView: View {
+    @Environment(\.scenePhase) var scenePhase
+
+    enum FileImporterType {
+        case none
+        case upload
+        case injectFile
+        case restoreSnapshot
+    }
+
     @StateObject var motherboard = Motherboard()
     @StateObject var terminalVM = TerminalViewModel()
     @State private var showingFileImporter = false
+    @State private var activeImporter: FileImporterType = .none
     @State private var xmodem: XMODEM?
-    @State private var showingSpeechDialog = false
-    @State private var speechInput = "Hello World"
+    @State private var showingHistory = false
 
-    // Recording State
-    @State private var isRecording = false
-    @State private var recordedAudioURL: URL?
-    @State private var showingSavePanel = false
+    // Smart Injection State
+    @State private var showingInjectionSheet = false
+    @State private var pendingInjectionData: Data?
+    @State private var injectionFilename = ""
 
     var body: some View {
         VStack {
@@ -37,18 +45,27 @@ struct ContentView: View {
                     .help("Paste text from system clipboard")
 
                     Button(action: {
+                        activeImporter = .injectFile
                         showingFileImporter = true
                     }) {
-                        Label("Upload", systemImage: "arrow.up.doc")
+                        Label("Inject File", systemImage: "square.and.arrow.down")
                     }
-                    .help("Upload binary file using XMODEM")
+                    .help("Inject a file into CP/M (Current Drive)")
 
                     Button(action: {
-                        showingSpeechDialog = true
+                        activeImporter = .restoreSnapshot
+                        showingFileImporter = true
                     }) {
-                        Label("Speech Tool", systemImage: "waveform")
+                        Label("Restore Snapshot", systemImage: "memorychip")
                     }
-                    .help("Open Speech Synthesis BASIC Generator")
+                    .help("Restore a dull 512KB RAM Snapshot (Destructive!)")
+
+                    Button(action: {
+                        showingHistory = true
+                    }) {
+                        Label("History", systemImage: "clock")
+                    }
+                    .help("View Session History Log")
 
                     Button(action: {
                         motherboard.reset()
@@ -61,104 +78,132 @@ struct ContentView: View {
                     }
                     .help("Reset emulator and reload ROM")
 
-                    Button(action: toggleRecording) {
-                        Label(
-                            "Record",
-                            systemImage: isRecording ? "record.circle.fill" : "record.circle")
-                    }
-                    .help("Record speech output to WAV file")
-                    .tint(isRecording ? .red : .primary)
                 }
             }
 
             HStack {
                 Text("Status: \(motherboard.cpu.halted ? "Halted" : "Running")")
+                Text("[\(motherboard.id.uuidString.prefix(4))]")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(motherboard.ideStatusMessage)
+                    .foregroundStyle(
+                        motherboard.ideStatusMessage.contains("Success") ? .green : .red)
                 Spacer()
                 Text("Cycles: \(motherboard.cpu.cycles)")
             }
             .padding()
             .font(.caption)
         }
-        .onReceive(motherboard.$terminalOutput) { data in
-            if !data.isEmpty {
-                print("ContentView: Received \(data.count) bytes of terminal data")
-                for byte in data {
-                    // Pass the byte to the XMODEM handler if a transfer is active
-                    xmodem?.handleByte(byte)
-
-                    terminalVM.putChar(Character(UnicodeScalar(byte)))
-                }
-                motherboard.clearTerminalOutput()
+        .onReceive(motherboard.terminalStream) { data in
+            // Pass data to XMODEM if active
+            for byte in data {
+                xmodem?.handleByte(byte)
             }
+
+            // Update Terminal VM (UI) - Batch Update
+            terminalVM.putData(data)
         }
         .onAppear {
             motherboard.start()
         }
         .fileImporter(
             isPresented: $showingFileImporter,
-            allowedContentTypes: [.item],
+            allowedContentTypes: activeImporter == .upload ? [.item] : [.data],
             allowsMultipleSelection: false
         ) { result in
             do {
-                if let fileUrl = try result.get().first {
-                    if fileUrl.startAccessingSecurityScopedResource() {
-                        let data = try Data(contentsOf: fileUrl)
-                        startUpload(data: data)
-                        fileUrl.stopAccessingSecurityScopedResource()
-                    }
+                guard let fileUrl = try result.get().first else { return }
+                guard fileUrl.startAccessingSecurityScopedResource() else { return }
+
+                switch activeImporter {
+                case .upload:
+                    // Raw Upload (Manual XMODEM)
+                    let data = try Data(contentsOf: fileUrl)
+                    startUpload(data: data)
+
+                case .injectFile:
+                    // Smart Injection Request
+                    let data = try Data(contentsOf: fileUrl)
+                    pendingInjectionData = data
+                    injectionFilename = fileUrl.lastPathComponent.uppercased()
+                    showingInjectionSheet = true
+
+                case .restoreSnapshot:
+                    let data = try Data(contentsOf: fileUrl)
+                    motherboard.injectRAM(data)
+
+                case .none:
+                    break
                 }
+
+                fileUrl.stopAccessingSecurityScopedResource()
             } catch {
                 print("File import failed: \(error.localizedDescription)")
             }
         }
-        .sheet(isPresented: $showingSpeechDialog) {
-            VStack(spacing: 20) {
-                Text("Speech Tool: SPEAK")
-                    .font(.headline)
 
-                Text("Enter text to speak (e.g. 'Hello World'):")
-                    .font(.caption)
-
-                TextEditor(text: $speechInput)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(height: 150)
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.5)))
-
-                Picker(
-                    "Voice",
-                    selection: Binding(
-                        get: { motherboard.speechDevice.currentVoiceIdentifier },
-                        set: { motherboard.speechDevice.currentVoiceIdentifier = $0 }
-                    )
-                ) {
-                    ForEach(motherboard.speechDevice.availableVoices, id: \.identifier) { voice in
-                        Text(voice.name).tag(voice.identifier)
+        .sheet(isPresented: $showingHistory) {
+            VStack {
+                HStack {
+                    Text("Session History")
+                        .font(.headline)
+                    Spacer()
+                    Button("Copy All") {
+                        let pasteboard = NSPasteboard.general
+                        pasteboard.clearContents()
+                        pasteboard.setString(motherboard.sessionLog, forType: .string)
+                    }
+                    Button("Close") {
+                        showingHistory = false
                     }
                 }
-                .pickerStyle(.menu)
+                .padding()
+
+                TextEditor(text: .constant(motherboard.sessionLog))
+                    .font(.system(.body, design: .monospaced))
+                    .frame(width: 600, height: 400)
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.5)))
+            }
+            .padding()
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background {
+                saveOnExit()
+            }
+        }
+        .sheet(isPresented: $showingInjectionSheet) {
+            VStack(spacing: 20) {
+                Text("Inject File to CP/M")
+                    .font(.headline)
+
+                TextField("Filename (e.g. GAME.COM)", text: $injectionFilename)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 250)
+
+                Text("This will type 'XM R <FILENAME>' and start the transfer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 HStack {
-                    Button("Cancel") { showingSpeechDialog = false }
-                    Button("Generate & Run") {
-                        let program = generateBasicSpeech(from: speechInput)
-                        motherboard.pasteText(program)
-                        showingSpeechDialog = false
+                    Button("Cancel") {
+                        showingInjectionSheet = false
+                        pendingInjectionData = nil
                     }
-                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.cancelAction)
+
+                    Button("Inject") {
+                        if let data = pendingInjectionData {
+                            startSmartInjection(filename: injectionFilename, data: data)
+                        }
+                        showingInjectionSheet = false
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
             }
             .padding()
-            .frame(width: 400, height: 400)
-        }
-        .fileExporter(
-            isPresented: $showingSavePanel,
-            document: recordedAudioURL.map { SoundFileDocument(url: $0) },
-            contentType: .wav,
-            defaultFilename: "speech_recording"
-        ) { result in
-            if case .success = result {
-                print("File saved successfully")
-            }
+            .frame(width: 300, height: 200)
         }
     }
 
@@ -178,80 +223,24 @@ struct ContentView: View {
         }
     }
 
-    func generateBasicSpeech(from input: String) -> String {
-        let cleanInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\"", with: "'")
+    func startSmartInjection(filename: String, data: Data) {
+        // 1. Send Command (Clear buffer first?)
+        // Assumes XM.COM is on Drive B: (User Request)
+        motherboard.pasteText("\rB:XM R \(filename)\r")
 
-        if cleanInput.isEmpty { return "" }
-
-        // Chunking output to avoid BASIC line length limits
-        let chunkSize = 60
-        var chunks: [String] = []
-        var startIndex = cleanInput.startIndex
-
-        while startIndex < cleanInput.endIndex {
-            let endIndex =
-                cleanInput.index(startIndex, offsetBy: chunkSize, limitedBy: cleanInput.endIndex)
-                ?? cleanInput.endIndex
-            chunks.append(String(cleanInput[startIndex..<endIndex]))
-            startIndex = endIndex
-        }
-
-        // Generate BASIC program using GOSUB for efficiency
-        var program = "10 REM SPEECH\r"
-        var lineNum = 20
-
-        for chunk in chunks {
-            program += "\(lineNum) S$=\"\(chunk)\"\r"
-            lineNum += 10
-            program += "\(lineNum) GOSUB 1000\r"
-            lineNum += 10
-        }
-
-        program += "\(lineNum) OUT 80,13\r"  // Trigger speech
-        program += "\(lineNum + 10) END\r"
-
-        // Output Subroutine
-        program += "1000 FOR I=1 TO LEN(S$):OUT 80,ASC(MID$(S$,I,1)):NEXT:RETURN\r"
-
-        // Auto-run
-        program += "RUN\r"
-
-        return program
-    }
-
-    func toggleRecording() {
-        if isRecording {
-            if let url = motherboard.speechDevice.stopRecording() {
-                self.recordedAudioURL = url
-                self.showingSavePanel = true
-            }
-            isRecording = false
-        } else {
-            motherboard.speechDevice.startRecording()
-            isRecording = true
+        // 2. Wait for CP/M to launch XM (Delay 1.5s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            // 3. Start Transfer
+            print("ContentView: Starting Smart Upload of \(filename)")
+            self.startUpload(data: data)
         }
     }
+
 }
 
-extension Color {
-    static let darkGray = Color(white: 0.15)
-}
-
-struct SoundFileDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.wav] }
-
-    var url: URL
-
-    init(url: URL) {
-        self.url = url
-    }
-
-    init(configuration: ReadConfiguration) throws {
-        self.url = URL(fileURLWithPath: "")
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        return try FileWrapper(url: url, options: .immediate)
+// Ensure saving on exit/background
+extension ContentView {
+    func saveOnExit() {
+        motherboard.saveRAM()
     }
 }

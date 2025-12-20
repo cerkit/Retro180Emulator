@@ -22,6 +22,7 @@ public class XMODEM {
     public init(data: Data, callback: @escaping (TransferEvent) -> Void) {
         self.fileData = data
         self.callback = callback
+        print("XMODEM: Staged \(data.count) bytes. Waiting for receiver (NAK/C)...")
     }
 
     public func handleByte(_ byte: UInt8) {

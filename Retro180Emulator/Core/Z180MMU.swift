@@ -3,7 +3,7 @@ import Foundation
 /// Z180 MMU Implementation
 /// Handles translation from 16-bit logical addresses to 20-bit physical addresses.
 public class Z180MMU: Z180Memory {
-    private var ram: Data
+    public var ram: Data
     private var rom: Data
 
     // Z180 MMU Registers

@@ -22,7 +22,6 @@ public class Z180ASCI: ExternalDevice {
         // We use a simplified internal offset for the channel based on port addr
         // 0=CNTLA, 1=CNTLB, 2=STAT, 3=TDR, 4=RDR, 5=ASEXT, 6=IER
         let reg = internalRegister(for: port)
-        // print("ASCI Read Port: 0x\(String(port, radix: 16)) Reg: \(reg)")
 
         switch reg {
         case 0: return controlA
@@ -48,7 +47,7 @@ public class Z180ASCI: ExternalDevice {
                 s |= 0x80
                 // Move to latch immediately to clear "Level Triggered" interrupt in buffer check?
                 receiveLatch = inputBuffer.popFirst()
-                // print("ASCI: Auto-Latched char '104'")  // 'h' debug
+
             }
 
             // TDRE (Bit 1) is always true (buffer empty/ready)
@@ -56,31 +55,30 @@ public class Z180ASCI: ExternalDevice {
             // DCD0 (Bit 2) - Set to 1 (Input Low = Active Carrier)
             s |= 0x04
 
-            // print("ASCI Read STAT (Port 4) -> 0x\(String(s, radix: 16))")
             return s
         case 3:  // TDR/RDR (0x06) - Shared!
             // RDR Read: Return latch if exists, else buffer
             if let l = receiveLatch {
                 receiveLatch = nil
-                // print("ASCI: Read RDR (Latch) -> '\(l)'")
+
                 return l
             }
             let char = inputBuffer.popFirst() ?? 0
-            // print("ASCI: Read RDR (Direct) -> '\(char)'")
+
             return char
         case 4:  // RDR (0x08) - Mapping just in case
             if let l = receiveLatch {
                 receiveLatch = nil
-                // print("ASCI: Read RDR (Latch) -> '\(l)'")
+
                 return l
             }
             let char = inputBuffer.popFirst() ?? 0
-            // print("ASCI: Read RDR (Direct) -> '\(char)'")
+
             return char
         case 5: return extensionControl
         case 6: return interruptEnable
         default:
-            print("ASCI: Unhandled Read Port: 0x\(String(port, radix: 16))")
+            // print("ASCI: Unhandled Read Port: 0x\(String(port, radix: 16))")
             return 0
         }
     }
@@ -115,7 +113,7 @@ public class Z180ASCI: ExternalDevice {
             outputBuffer.append(value)
         // Real-time console mirror for debugging
         // let scalar = UnicodeScalar(value)
-        // print("\(Character(scalar))", terminator: "")
+
         // fflush(stdout)
         case 5: extensionControl = value
         case 6: interruptEnable = value
@@ -167,7 +165,7 @@ public class Z180ASCI: ExternalDevice {
         let rdrf = !inputBuffer.isEmpty  // Check actual buffer, not stale status bit
 
         if rie && rdrf {
-            // print("ASCI: Interrupt Request! RIE=\(rie), RDRF=\(rdrf)")
+
             return true
         }
         return false

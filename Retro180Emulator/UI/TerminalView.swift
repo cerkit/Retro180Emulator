@@ -91,7 +91,19 @@ class TerminalViewModel: ObservableObject {
     @Published var cursorRow = 0
     @Published var cursorCol = 0
 
+    func putData(_ data: Data) {
+        for byte in data {
+            processChar(Character(UnicodeScalar(byte)))
+        }
+        objectWillChange.send()
+    }
+
     func putChar(_ char: Character) {
+        processChar(char)
+        objectWillChange.send()
+    }
+
+    private func processChar(_ char: Character) {
         // Map CP437 box-drawing characters to Unicode
         var displayChar = char
         if let scalar = char.unicodeScalars.first?.value {
@@ -122,7 +134,6 @@ class TerminalViewModel: ObservableObject {
                 }
             }
         }
-        objectWillChange.send()
     }
 
     private func newLine() {
