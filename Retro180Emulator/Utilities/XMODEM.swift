@@ -18,6 +18,7 @@ public class XMODEM {
     private var fileData: Data
     private var blockNumber: UInt8 = 1
     private var callback: (TransferEvent) -> Void
+    private var sentEOT = false  // Track if we have already sent the End of Transmission
 
     public init(data: Data, callback: @escaping (TransferEvent) -> Void) {
         self.fileData = data
@@ -27,15 +28,32 @@ public class XMODEM {
     public func handleByte(_ byte: UInt8) {
         switch byte {
         case CRC_MODE, NAK:
-            sendBlock()
+            if !sentEOT {
+                print("XMODEM: Receiver requested retransmit/start (NAK/C)")
+                sendBlock()
+            }
         case ACK:
+            if sentEOT {
+                // We received ACK for our EOT. Transmission complete.
+                print("XMODEM: EOT Acknowledged. Transfer complete.")
+                callback(.complete)
+                return
+            }
+
+            print("XMODEM: Block \(blockNumber) ACKed")
             blockNumber = blockNumber &+ 1
             if fileData.isEmpty {
+                print("XMODEM: EOF reached. Sending EOT.")
                 callback(.sendByte(EOT))
+                sentEOT = true
             } else {
                 sendBlock()
             }
+        case CAN:
+            print("XMODEM: Receiver Cancelled Transfer")
+            callback(.error("Receiver cancelled transfer"))
         default:
+            // Ignore other bytes
             break
         }
     }

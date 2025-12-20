@@ -11,7 +11,8 @@ public class Motherboard: ObservableObject {
     public let prt = Z180PRT()
     public let speechDevice = SpeechDevice()
 
-    @Published public var terminalOutput = Data()
+    public let terminalDataStream = PassthroughSubject<Data, Never>()
+    // terminalOutput removed in favor of stream
     @Published public var inputQueue = [UInt8]()  // For pasting text
     private var timer: Timer?
     private var traceCount = 0
@@ -19,7 +20,7 @@ public class Motherboard: ObservableObject {
     private var tracing = false
 
     private var lastInputTick: UInt64 = 0
-    private let inputInterval: UInt64 = 10000  // Cycles between characters
+    private let inputInterval: UInt64 = 100  // Cycles between characters (fast for XMODEM)
 
     public init() {
         cpu.memory = mmu
@@ -50,7 +51,7 @@ public class Motherboard: ObservableObject {
         // We probably should reset IO dispatcher too?
         // For now, let's just reload ROM and clear buffers.
 
-        terminalOutput.removeAll()
+        // terminalOutput.removeAll() // Stream doesn't need clearing
         inputQueue.removeAll()
 
         initializeROM()
@@ -83,7 +84,7 @@ public class Motherboard: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.010, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let cyclesBefore = self.cpu.cycles
-            for _ in 0..<5000 {
+            for _ in 0..<20000 {
                 self.cpu.step()
             }
             let cyclesPassed = Int(self.cpu.cycles &- cyclesBefore)
@@ -109,7 +110,14 @@ public class Motherboard: ObservableObject {
 
             let data = self.asci0.getAvailableOutput()
             if !data.isEmpty {
-                self.terminalOutput.append(data)
+                self.terminalDataStream.send(data)
+            }
+
+            // CRASH TRAP
+            // Detect if the system is repeatedly Cold Booting (jumping to 0 while ROM is active).
+            // We assume boot takes < 2 seconds (4M cycles at 2MHz).
+            if self.cpu.cycles > 4_000_000 && self.cpu.PC == 0x0000 {
+                print("Motherboard: CRASH DETECTED! PC hit 0x0000 after boot.")
             }
             self.objectWillChange.send()  // Ensure UI updates for cycles/halted state
         }
@@ -129,9 +137,7 @@ public class Motherboard: ObservableObject {
         }
     }
 
-    public func clearTerminalOutput() {
-        terminalOutput.removeAll()
-    }
+    // clearTerminalOutput no longer needed due to stream
 
     public func loadROM(fromURL url: URL) {
         do {

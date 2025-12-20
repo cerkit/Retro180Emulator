@@ -158,27 +158,20 @@ public class Z180CPU {
             // But we want to see 'I'.
         }
 
-        if IM == 2 {
-            let tableAddr = (UInt16(I) << 8) | UInt16(vector)
-            let low = memory?.read(address: tableAddr) ?? 0
-            let high = memory?.read(address: tableAddr + 1) ?? 0
-            let target = (UInt16(high) << 8) | UInt16(low)
-            // print("CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (I=0x\(String(I, radix: 16)) Table=0x\(String(tableAddr, radix: 16))) -> Target 0x\(String(target, radix: 16))")
+        // Z180 Internal Interrupts (ASCI, PRT, DMA) ALWAYS use Vectored Interrupts (like IM 2).
+        // They are not affected by the IM 0/1/2 instructions (which only affect INT0 pin).
+        // Since our `io` currently only reports internal interrupts, we treat them all as Vectored.
 
-            IFF1 = false
-            IFF2 = false
-            push(PC)
-            PC = target
-        } else {
-            // print("CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (IM \(IM))")
-            IFF1 = false
-            IFF2 = false
-            // Handle IM 0/1...
-            if IM == 1 {
-                push(PC)
-                PC = 0x38
-            }
-        }
+        let tableAddr = (UInt16(I) << 8) | UInt16(vector)
+        let low = memory?.read(address: tableAddr) ?? 0
+        let high = memory?.read(address: tableAddr + 1) ?? 0
+        let target = (UInt16(high) << 8) | UInt16(low)
+        // print("CPU: INT Ack Vector=0x\(String(vector, radix: 16)) (I=0x\(String(I, radix: 16)) Table=0x\(String(tableAddr, radix: 16))) -> Target 0x\(String(target, radix: 16))")
+
+        IFF1 = false
+        IFF2 = false
+        push(PC)
+        PC = target
         halted = false
         cycles = cycles &+ 12
     }
@@ -610,18 +603,14 @@ extension Z180CPU {
             let p = fetchByte()
             io?.write(port: UInt16(p), value: getReg8((opcode >> 3) & 7))
         case 0x83:
-            let p = fetchByte()
-            otim(port: p)  // OTIM
+            otim()  // OTIM
         case 0x93:
-            let p = fetchByte()
-            otim(port: p)
+            otim()
             if B != 0 { PC = PC &- 2 }  // OTIMR
         case 0x8B:
-            let p = fetchByte()
-            otdm(port: p)  // OTDM
+            otdm()  // OTDM
         case 0x9B:
-            let p = fetchByte()
-            otdm(port: p)
+            otdm()
             if B != 0 { PC = PC &- 2 }  // OTDMR
         case 0x67: rrd()
         case 0x6F: rld()
@@ -1020,21 +1009,28 @@ extension Z180CPU {
         flagZ = B == 0
         flagN = true
     }
-    func otim(port: UInt8) {
+    func otim() {
         let v = readByte(HL)
-        io?.write(port: UInt16(port), value: v)
+        // Z180 Manual: The port address is placed on the lower half of the address bus (A0-A7)
+        // containing the contents of Register C. The upper half (A8-A15) is 0.
+        io?.write(port: UInt16(C), value: v)
         HL = HL &+ 1
         B = B &- 1
         flagN = true
         flagZ = B == 0
+        flagH = true  // Z180 manual says H is set
+        flagC = true  // Z180 manual says C is set if B goes to 0? No, unknown. Leave as is?
+        // Actually Zilog UM005004-0918 says:
+        // S, Z: Affected. H: Set. P/V: Unknown. N: Set. C: Unknown.
     }
-    func otdm(port: UInt8) {
+    func otdm() {
         let v = readByte(HL)
-        io?.write(port: UInt16(port), value: v)
+        io?.write(port: UInt16(C), value: v)
         HL = HL &- 1
         B = B &- 1
         flagN = true
         flagZ = B == 0
+        flagH = true
     }
     func mlt(_ oc: UInt8) {
         let r = (oc >> 4) & 3
