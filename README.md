@@ -2,12 +2,12 @@
 
 ## 1. System Overview
 
-**Retro180Emulator** is a macOS-based emulator for the Zilog Z180 microprocessor, specifically tailored to emulate the SC131 pocket-sized computer architecture. It provides a comprehensive emulation environment including a Z180 CPU core, Memory Management Unit (MMU), Serial I/O (ASCI), and specialized hardware extensions like a text-to-speech engine.
+**Retro180Emulator** is a macOS-based emulator for the Zilog Z180 microprocessor, specifically tailored to emulate the [SC131 pocket-sized computer](https://smallcomputercentral.com/sc131-z180-pocket-computer/) architecture. It provides a comprehensive emulation environment including a Z180 CPU core, Memory Management Unit (MMU), Serial I/O (ASCI), and specialized hardware extensions like a text-to-speech engine.
 
 The system is designed with a layered architecture, separating the core hardware simulation (`Core` & `Hardware` modules) from the user presentation layer (`UI` module). This ensures a clean separation of concerns, where the `Motherboard` acts as the central integration point, simulating the physical motherboard's bus and clock.
 
 Key Design Philosophies:
--   **Accuracy driven by "Good Enough" Utility**: The emulation targets instruction-set compatibility sufficient to run the RomWBW operating system (CP/M-80 compatible) rather than cycle-perfect hardware accuracy.
+-   **Accuracy driven by "Good Enough" Utility**: The emulation targets instruction-set compatibility sufficient to run the [RomWBW](https://smallcomputercentral.com/firmware/firmware-romwbw/) operating system (CP/M-80 compatible) rather than cycle-perfect hardware accuracy.
 -   **Native macOS Integration**: Utilizes Swift and SwiftUI for a performant, modern user interface, leveraging AVFoundation for high-quality speech synthesis rather than emulating legacy synthesizer chips.
 -   **Component Modularity**: Each hardware subsystem (CPU, MMU, I/O) is isolated, allowing for easier debugging and potential future expansion (e.g., adding an SD card emulation).
 
